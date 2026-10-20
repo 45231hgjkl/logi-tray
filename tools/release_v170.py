@@ -230,6 +230,18 @@ def main(argv) -> int:
     if status != 200:
         _, all_rel = api("GET", f"/repos/{REPO}/releases?per_page=100")
         hit = next((r for r in (all_rel or []) if r.get("tag_name") == TAG), None)
+        if hit is None:
+            # 草稿的 tag_name 是 `untagged-<hash>` 占位串，按真 tag 永远匹配不到。
+            # 只按 tag_name 找的话，重跑本脚本会把第一次留下的草稿当成「不存在」，
+            # 于是再 POST 一个，线上就出现两个 v1.7.0（本次发布实际踩到了）。
+            # 因此退回「按标题找同名草稿」：标题里带 TAG 前缀即可认定是同一版。
+            hit = next(
+                (r for r in (all_rel or [])
+                 if r.get("draft") and str(r.get("name", "")).startswith(TAG)),
+                None,
+            )
+            if hit is not None:
+                print(f"找到同名草稿（tag_name={hit['tag_name']!r}），复用而不是新建")
         status, rel = (200, hit) if hit else (status, rel)
     if status == 200:
         print(f"\nrelease 已存在: {rel['html_url']}")
@@ -275,7 +287,7 @@ def main(argv) -> int:
     if got != sorted(ASSETS):
         print(f"\n资产与预期不符：实际 {got} 期望 {sorted(ASSETS)} —— 不自动公开。")
         return 1
-    print("三个资产一致 ✓")
+    print("三个资产一致 [OK]")
 
     if publish:
         # 必须带上 tag_name：草稿的 tag_name 是 `untagged-<hash>` 占位串，
