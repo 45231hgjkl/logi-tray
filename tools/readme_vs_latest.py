@@ -52,10 +52,12 @@ def readme_names(path, label):
 def real_names(text):
     """抽出真实资产文件名。
 
-    必须排除文档里的占位写法 `logi-tray-vX.Y.Z.zip`（README 用它泛指「版本号随发布变」），
-    否则对账会报出一堆假缺失，把真正的缺失淹掉。
+    必须排除文档里的占位写法 `logi-tray-vX.Y.Z-setup.exe`（README 用它泛指
+    「版本号随发布变」），否则对账会报出一堆假缺失，把真正的缺失淹掉。
+
+    只认 -setup.exe：v1.7 起分发包是 Inno Setup 的安装程序，README 也只承诺这种。
     """
-    names = re.findall(r"`((?:logi-tray|multi-tray)[A-Za-z0-9._-]*\.zip)`", text)
+    names = re.findall(r"`((?:logi-tray|multi-tray)[A-Za-z0-9._-]*-setup\.exe)`", text)
     return sorted({n for n in names
                    if re.search(r"-v\d+\.\d+", n)})
 
@@ -87,8 +89,8 @@ def main() -> int:
     url = f"https://github.com/{REPO}/releases/expanded_assets/{tag}"
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     html = _open(req, follow=True).read().decode("utf-8", errors="replace")
-    actual = sorted(set(re.findall(r">((?:logi-tray|multi-tray)[A-Za-z0-9._-]*\.zip)<",
-                                   html)))
+    actual = sorted(set(re.findall(
+        r">((?:logi-tray|multi-tray)[A-Za-z0-9._-]*-setup\.exe)<", html)))
     print("实际资产:")
     for n in actual:
         print(f"   {n}")

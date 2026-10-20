@@ -1,15 +1,21 @@
-"""Package all editions of logi-tray into release zips.
+"""Build all editions of logi-tray and package each one as a Windows setup program.
 
 Usage:
     python tools/package_release.py
 
-Produces three independent archives so users pick the edition they want:
-    release/logi-tray-vX.Y.Z.zip        full edition (WPF + acrylic, 3 icon styles)
-    release/logi-tray-lite-vX.Y.Z.zip   lightweight edition (WinForms, number icon)
-    release/multi-tray-vX.Y.Z.zip       multi-brand edition (Logitech / MCHOSE / ATK)
+Produces three independent Setup executables, so users pick the edition they want:
+    release/logi-tray-vX.Y.Z-setup.exe        full edition (WPF + acrylic, 3 icon styles)
+    release/logi-tray-lite-vX.Y.Z-setup.exe   lightweight edition (WinForms, number icon)
+    release/multi-tray-vX.Y.Z-setup.exe       multi-brand edition (Logitech / MCHOSE / ATK)
 
-Each archive gets its own installer, uninstaller and readme, generated from the
-templates below so the three cannot drift apart.
+安装方式改用 Inno Setup 编译 setup/*.iss 得到的单文件安装程序：双击即装、
+全程不弹 UAC（装到 %LOCALAPPDATA%\\Programs\\<app>），在「应用和功能」里有
+正规的卸载登记，支持 /SILENT 与 /LOG=... 便于排查。
+不再生成「一键安装.bat / 卸载.bat」：批处理无法登记卸载项、无法静默部署，
+也无法在程序运行中安全替换文件。
+
+编译机需要 Inno Setup 6（winget install JRSoftware.InnoSetup）。
+ISCC 路径见 ISCC_CANDIDATES，也可用环境变量 INNO_SETUP_DIR 指定。
 
 版本号取自各自的 csproj（三者独立编号，互不相同），发布脚本再按这些名字
 去 release/ 取包上传 —— 所以改了 csproj 的 <Version> 就必须重跑本脚本。
@@ -18,10 +24,18 @@ import os
 import re
 import shutil
 import subprocess
-import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = os.path.join(REPO, "release")
+SETUP = os.path.join(REPO, "setup")
+
+# Inno Setup 的命令行编译器。找不到就明确报错，不要去猜用户机器上的路径。
+ISCC_CANDIDATES = [
+    os.environ.get("INNO_SETUP_DIR", ""),
+    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6"),
+    r"C:\Program Files (x86)\Inno Setup 6",
+    r"C:\Program Files\Inno Setup 6",
+]
 
 
 def csproj_version(path):
@@ -37,171 +51,6 @@ print(f"full version = {FULL_VER}")
 print(f"lite version = {LITE_VER}")
 print(f"multi version = {MULTI_VER}")
 
-INSTALLER = r"""@echo off
-chcp 65001 >nul
-title {title} · 一键安装向导
-setlocal enabledelayedexpansion
-
-echo ======================================================
-echo        {title} · 一键安装向导
-echo ======================================================
-echo.
-
-set "TARGET_DIR=%LOCALAPPDATA%\Programs\{app}"
-set "NET8_URL=https://dotnet.microsoft.com/download/dotnet/8.0"
-
-echo [1/6] 正在检测 .NET 8 桌面运行时...
-set "HAS_NET8="
-for %%D in ("%ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App") do (
-  if exist %%D (
-    for /f "delims=" %%V in ('dir /b /ad %%D 2^>nul ^| findstr /b "8."') do set "HAS_NET8=%%V"
-  )
-)
-if not defined HAS_NET8 (
-  for %%D in ("%ProgramFiles(x86)%\dotnet\shared\Microsoft.WindowsDesktop.App") do (
-    if exist %%D (
-      for /f "delims=" %%V in ('dir /b /ad %%D 2^>nul ^| findstr /b "8."') do set "HAS_NET8=%%V"
-    )
-  )
-)
-
-if defined HAS_NET8 (
-  echo       [OK] 已检测到 .NET 8 桌面运行时 ^(!HAS_NET8!^)
-) else (
-  echo       [X] 未检测到 .NET 8 桌面运行时！
-  echo.
-  echo       {title} 需要微软官方免费的 .NET 8 Desktop Runtime。
-  echo       即将为你打开官方下载页面，请下载并安装：
-  echo         .NET Desktop Runtime 8.0 - x64
-  echo       下载地址: %NET8_URL%
-  echo.
-  choice /c YN /n /m "      是否现在打开下载页面？(Y/N) "
-  if errorlevel 2 goto :net8_hint
-  start "" "%NET8_URL%"
-  goto :net8_hint
-)
-
-echo.
-echo [2/6] 正在关闭旧版进程...
-taskkill /f /im {app}.exe >nul 2>nul
-taskkill /f /im mouse-tray.exe >nul 2>nul
-taskkill /f /im logi-tray.exe >nul 2>nul
-taskkill /f /im logi-tray-lite.exe >nul 2>nul
-
-echo [3/6] 正在部署程序文件至 %TARGET_DIR%
-if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>nul
-xcopy /y /e /q "%~dp0*.*" "%TARGET_DIR%\" >nul
-if errorlevel 1 (
-  echo       [X] 文件复制失败，请检查磁盘权限。
-  pause
-  exit /b 1
-)
-
-echo [4/6] 正在创建快捷方式...
-set "LNK_NAME={title}.lnk"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ws = New-Object -ComObject WScript.Shell;" ^
-  "$dirs = @('%APPDATA%\Microsoft\Windows\Start Menu\Programs', [Environment]::GetFolderPath('Desktop'));" ^
-  "foreach ($d in $dirs) {{ $p = Join-Path $d '%LNK_NAME%'; $s = $ws.CreateShortcut($p); $s.TargetPath = '%TARGET_DIR%\{app}.exe'; $s.IconLocation = '%TARGET_DIR%\app.ico,0'; $s.WorkingDirectory = '%TARGET_DIR%'; $s.Description = '{title}'; $s.Save() }}"
-
-echo [5/6] 正在启动 {title}...
-start "" "%TARGET_DIR%\{app}.exe"
-
-REM ---------------------------------------------------------------
-REM  任务栏常驻显示：必须在程序**启动之后**再做。
-REM
-REM  Windows 是在程序首次注册托盘图标时才创建
-REM  HKCU\Control Panel\NotifyIconSettings 下对应的项。
-REM  首次安装时程序还没运行过，此时去设置 IsPromoted 找不到目标，
-REM  图标就会一直蜷在任务栏的折叠区里。
-REM  因此这里先启动程序，轮询等待注册表项出现，再置为常驻显示。
-REM ---------------------------------------------------------------
-echo.
-echo       正在配置任务栏常驻显示（等待托盘图标注册）...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$key = 'HKCU:\Control Panel\NotifyIconSettings';" ^
-  "$deadline = (Get-Date).AddSeconds(25);" ^
-  "$done = $false;" ^
-  "while (-not $done -and (Get-Date) -lt $deadline) {{" ^
-  "  Start-Sleep -Milliseconds 500;" ^
-  "  if (-not (Test-Path $key)) {{ continue }}" ^
-  "  Get-ChildItem $key -ErrorAction SilentlyContinue | ForEach-Object {{" ^
-  "    $v = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue;" ^
-  "    if ($v.ExecutablePath -like '*{app}.exe*') {{" ^
-  "      Set-ItemProperty $_.PSPath -Name 'IsPromoted' -Value 1 -ErrorAction SilentlyContinue;" ^
-  "      $script:done = $true" ^
-  "    }}" ^
-  "  }}" ^
-  "}};" ^
-  "if ($done) {{ Write-Host '      [OK] 已设为常驻显示' }} else {{ Write-Host '      [i] 未能自动设置，可从任务栏折叠区拖出图标' }}"
-
-echo.
-echo ======================================================
-echo   [OK] 安装完成！
-echo ------------------------------------------------------
-echo   程序已常驻屏幕右下角任务栏通知区域。
-{usage}
-echo.
-echo   如需卸载，请运行安装目录下的 卸载.bat
-echo ======================================================
-echo.
-pause
-exit /b 0
-
-:net8_hint
-echo.
-echo ------------------------------------------------------
-echo   请先安装 .NET 8 Desktop Runtime 后再运行本脚本。
-echo   官方下载: %NET8_URL%
-echo ------------------------------------------------------
-echo.
-pause
-exit /b 1
-"""
-
-UNINSTALLER = r"""@echo off
-chcp 65001 >nul
-title {title} · 卸载向导
-echo ======================================================
-echo                {title} · 卸载向导
-echo ======================================================
-echo.
-
-set "TARGET_DIR=%LOCALAPPDATA%\Programs\{app}"
-
-echo [1/5] 正在停止进程...
-taskkill /f /im {app}.exe >nul 2>nul
-taskkill /f /im mouse-tray.exe >nul 2>nul
-timeout /t 1 >nul
-
-echo [2/5] 正在清理开机自启项...
-reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "{app}" /f >nul 2>nul
-
-echo [3/5] 正在清理快捷方式...
-del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\{title}.lnk" >nul 2>nul
-del /q "%USERPROFILE%\Desktop\{title}.lnk" >nul 2>nul
-
-echo [4/5] 正在移除程序文件...
-if exist "%TARGET_DIR%" rd /s /q "%TARGET_DIR%" >nul 2>nul
-
-echo [5/5] 正在清理托盘图标注册记录...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$key = 'HKCU:\Control Panel\NotifyIconSettings';" ^
-  "if (Test-Path $key) {{ Get-ChildItem $key | ForEach-Object {{ $v = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; if ($v.ExecutablePath -like '*{app}.exe*') {{ Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue }} }} }}"
-
-echo.
-echo ======================================================
-echo   [OK] {title} 已从您的电脑中完整卸载。
-echo.
-echo   注：用户配置与历史数据保留在
-echo       %LOCALAPPDATA%\{data}
-echo   如需彻底清除，请手动删除该文件夹。
-echo ======================================================
-echo.
-pause
-exit /b 0
-"""
-
 USAGE_FULL = r"""{title} v{version} · 使用说明
 ==================================================
 
@@ -211,7 +60,7 @@ USAGE_FULL = r"""{title} v{version} · 使用说明
   两者数据目录相互独立，可同时安装、同时运行。
 
 【快速开始】
-  1. 运行「一键安装.bat」（无需管理员权限）
+  1. 双击安装包（如 logi-tray-vX.Y.Z-setup.exe），按向导点「下一步」（无需管理员权限）
   2. 托盘图标即刻出现在任务栏右下角
   3. 若图标被折叠，点击任务栏的 ^ 箭头即可看到
 
@@ -227,17 +76,22 @@ USAGE_FULL = r"""{title} v{version} · 使用说明
   · 开机自动启动        仅写入当前用户注册表
   · 后台刷新间隔        10 秒 ~ 2 分钟
 
-【绿色便携】
-  也可直接双击 {app}.exe 运行，不写入任何系统位置。
-  配置文件位于 %LOCALAPPDATA%\{data}
+【安装位置】
+  程序装在 %LOCALAPPDATA%\Programs\{app}；
+  配置与历史记录在 %LOCALAPPDATA%\{data}（卸载时保留）。
 
 【常见问题】
   Q: 显示「设备离线或休眠」？
   A: 鼠标长时间未操作会进入休眠，动一下鼠标即可恢复读数。
 
   Q: 提示缺少 .NET 8？
-  A: 安装脚本会自动检测并引导下载微软官方的
-     .NET Desktop Runtime 8.0.x（Windows x64，免费）。
+  A: 安装程序会先检测运行时；缺失时会引导你打开微软官方的
+     .NET Desktop Runtime 8.0（Windows x64，免费）下载页，
+     装好后重新运行安装包即可。
+
+  Q: 怎么卸载？
+  A: 开始菜单 → {title} → 「卸载 {title}」，
+     或「设置 → 应用 → 已安装的应用」里找到它。
 """
 
 USAGE_LITE = r"""{title} v{version} · 使用说明
@@ -250,7 +104,7 @@ USAGE_LITE = r"""{title} v{version} · 使用说明
   需要亚克力毛玻璃与三种图标样式，请改用完整版 logi-tray。
 
 【快速开始】
-  1. 运行「一键安装.bat」（无需管理员权限）
+  1. 双击安装包（如 logi-tray-vX.Y.Z-setup.exe），按向导点「下一步」（无需管理员权限）
   2. 托盘图标即刻出现在任务栏右下角
   3. 若图标被折叠，点击任务栏的 ^ 箭头即可看到
 
@@ -267,9 +121,9 @@ USAGE_LITE = r"""{title} v{version} · 使用说明
 【外观】
   自动跟随 Windows 的浅色 / 深色应用主题，无需手动切换。
 
-【绿色便携】
-  也可直接双击 {app}.exe 运行，不写入任何系统位置。
-  配置文件位于 %LOCALAPPDATA%\{data}
+【安装位置】
+  程序装在 %LOCALAPPDATA%\Programs\{app}；
+  配置与历史记录在 %LOCALAPPDATA%\{data}（卸载时保留）。
 
 【常见问题】
   Q: 显示「设备离线或休眠」？
@@ -279,8 +133,13 @@ USAGE_LITE = r"""{title} v{version} · 使用说明
   A: 轻量版只提供数字样式；如需切换请使用完整版。
 
   Q: 提示缺少 .NET 8？
-  A: 安装脚本会自动检测并引导下载微软官方的
-     .NET Desktop Runtime 8.0.x（Windows x64，免费）。
+  A: 安装程序会先检测运行时；缺失时会引导你打开微软官方的
+     .NET Desktop Runtime 8.0（Windows x64，免费）下载页，
+     装好后重新运行安装包即可。
+
+  Q: 怎么卸载？
+  A: 开始菜单 → {title} → 「卸载 {title}」，
+     或「设置 → 应用 → 已安装的应用」里找到它。
 """
 
 USAGE_MULTI = r"""{title} v{version} · 使用说明
@@ -302,7 +161,7 @@ USAGE_MULTI = r"""{title} v{version} · 使用说明
   右上角的小圆点表示「还有其它设备」，鼠标移到图标上可看到全部设备。
 
 【快速开始】
-  1. 运行「一键安装.bat」（无需管理员权限）
+  1. 双击安装包（如 logi-tray-vX.Y.Z-setup.exe），按向导点「下一步」（无需管理员权限）
   2. 托盘图标即刻出现在任务栏右下角
   3. 若图标被折叠，点击任务栏的 ^ 箭头即可看到
 
@@ -335,9 +194,9 @@ USAGE_MULTI = r"""{title} v{version} · 使用说明
   multi-tray.exe --diag-atk         打印 ATK 键盘协议的探测过程
   multi-tray.exe --diag-mchose      打印迈从耳机的探测过程
 
-【绿色便携】
-  也可直接双击 {app}.exe 运行，不写入任何系统位置。
-  配置文件位于 %LOCALAPPDATA%\{data}
+【安装位置】
+  程序装在 %LOCALAPPDATA%\Programs\{app}；
+  配置与历史记录在 %LOCALAPPDATA%\{data}（卸载时保留）。
 
 【常见问题】
   Q: 某台设备一直显示「已休眠 / 离线」？
@@ -364,9 +223,36 @@ USAGE_MULTI = r"""{title} v{version} · 使用说明
      你自己那一版的最新包，所以不会出现「已经是新的还一直提示更新」。
 
   Q: 提示缺少 .NET 8？
-  A: 安装脚本会自动检测并引导下载微软官方的
-     .NET Desktop Runtime 8.0.x（Windows x64，免费）。
+  A: 安装程序会先检测运行时；缺失时会引导你打开微软官方的
+     .NET Desktop Runtime 8.0（Windows x64，免费）下载页，
+     装好后重新运行安装包即可。
+
+  Q: 怎么卸载？
+  A: 开始菜单 → {title} → 「卸载 {title}」，
+     或「设置 → 应用 → 已安装的应用」里找到它。
 """
+
+
+EDITIONS_USAGE = {
+    "logi-tray": USAGE_FULL,
+    "logi-tray-lite": USAGE_LITE,
+    "multi-tray": USAGE_MULTI,
+}
+
+
+def find_iscc():
+    """Locate Inno Setup's command line compiler."""
+    for base in ISCC_CANDIDATES:
+        if not base:
+            continue
+        exe = os.path.join(base, "ISCC.exe")
+        if os.path.isfile(exe):
+            return exe
+    raise SystemExit(
+        "找不到 Inno Setup 6 的 ISCC.exe。\n"
+        "装一下：winget install JRSoftware.InnoSetup\n"
+        "或用环境变量 INNO_SETUP_DIR 指向安装目录。"
+    )
 
 
 def build(project_rel):
@@ -380,129 +266,65 @@ def build(project_rel):
     return True
 
 
-def copy_app_body(src_dir, dst_dir, title, app, data_dir, version, usage):
-    """Copy the app body into the package.
+def write_readme(app, version):
+    """Materialise the per-edition 使用说明.txt that the installer ships.
 
-    Copies recursively (the lucide icon font lives in Fonts/, and without it the
-    About page and settings icons render as tofu), while skipping build noise and
-    the self-contained win-x64 runtime folder that a previous publish may have
-    left behind -- that folder is ~200 MB and the README documents installing the
-    shared .NET 8 Desktop Runtime instead.
+    生成物放在 setup/readme/ 下而不是直接塞进 bin，安装工程按需引用：
+    这样同一份说明既能被 Inno 装进程序目录，也能被本脚本重跑时覆盖更新。
     """
-    os.makedirs(dst_dir, exist_ok=True)
-    copied = []
-
-    for root, dirs, files in os.walk(src_dir):
-        dirs[:] = [d for d in dirs if d.lower() not in ("win-x64", "win-x86", "win-arm64")]
-
-        for name in files:
-            if name.endswith((".pdb", ".xml")):
-                continue
-            src = os.path.join(root, name)
-            rel = os.path.relpath(src, src_dir)
-            if rel.startswith(".."):
-                continue
-            dst = os.path.join(dst_dir, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            copied.append(rel.replace("\\", "/"))
-
-    shutil.copy2(os.path.join(REPO, "LICENSE"), os.path.join(dst_dir, "LICENSE"))
-
-    with open(os.path.join(dst_dir, "一键安装.bat"), "w", encoding="utf-8") as f:
-        f.write(INSTALLER.format(title=title, app=app, usage=usage["install"]))
-    with open(os.path.join(dst_dir, "卸载.bat"), "w", encoding="utf-8") as f:
-        f.write(UNINSTALLER.format(title=title, app=app, data=data_dir))
-    with open(os.path.join(dst_dir, "使用说明.txt"), "w", encoding="utf-8") as f:
-        f.write(usage["text"].format(title=title, app=app, data=data_dir, version=version))
-
-    return sorted(copied)
+    os.makedirs(os.path.join(SETUP, "readme"), exist_ok=True)
+    path = os.path.join(SETUP, "readme", app + ".txt")
+    text = EDITIONS_USAGE[app].format(title=app, app=app, data=app, version=version)
+    with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(text)
+    return path
 
 
-def zip_dir(src, dst):
-    if os.path.exists(dst):
-        os.remove(dst)
-    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, _, files in os.walk(src):
-            for f in files:
-                full = os.path.join(root, f)
-                z.write(full, os.path.relpath(full, src))
-    return os.path.getsize(dst)
+def compile_setup(iscc, iss_name, version):
+    """Compile one Inno Setup project. Returns the produced setup path."""
+    iss = os.path.join(SETUP, iss_name)
+    # 版本号从 csproj 读出来再传进去：入口 .iss 里的默认值只是给手工编译用的，
+    # 打包脚本不能依赖它，否则改了 csproj 却忘了改 .iss 就会静默发出旧版本号。
+    r = subprocess.run([iscc, "/Qp", f"/DAppVersion={version}", iss], cwd=REPO,
+                       capture_output=True, text=True, errors="replace")
+    if r.returncode != 0:
+        print(f"  ISCC FAILED for {iss_name}")
+        print((r.stdout or "")[-2000:])
+        raise SystemExit(1)
+    return True
 
 
 os.makedirs(RELEASE, exist_ok=True)
+ISCC = find_iscc()
+print(f"ISCC = {ISCC}")
 
-FULL_USAGE = {
-    "text": USAGE_FULL,
-    "install": (
-        "echo     · 左键点击托盘图标：展开亚克力电量详情面板\n"
-        "echo     · 右键点击托盘图标：切换图标样式 / 外观主题 / 设置\n"
-    ),
-}
-LITE_USAGE = {
-    "text": USAGE_LITE,
-    "install": (
-        "echo     · 左键点击托盘图标：展开电量详情卡片\n"
-        "echo     · 右键点击托盘图标：显示详情 / 设置 / 退出\n"
-    ),
-}
+EDITIONS = [
+    # (显示名, app 名, csproj, 安装工程, 使用说明)
+    ("full edition",  "logi-tray",      os.path.join("wpf", "MouseBatteryTray.csproj"),
+     "logi-tray.iss"),
+    ("lite edition",  "logi-tray-lite", os.path.join("lite", "LogiTrayLite.csproj"),
+     "logi-tray-lite.iss"),
+    ("multi-brand edition", "multi-tray", os.path.join("multi", "MultiTray.csproj"),
+     "multi-tray.iss"),
+]
 
-MULTI_USAGE = {
-    "text": USAGE_MULTI,
-    "install": (
-        "echo     · 左键点击托盘图标：查看各设备电量\n"
-        "echo     · 右键点击托盘图标：显示详情 / 设置 / 退出\n"
-    ),
-}
+produced = []
+for label, app, project, iss_name in EDITIONS:
+    print(f"\n=== {label} ===")
+    if not build(project):
+        raise SystemExit(1)
 
-# ---------- full edition ----------
-print("\n=== full edition ===")
-if not build(os.path.join("wpf", "MouseBatteryTray.csproj")):
-    raise SystemExit(1)
+    version = csproj_version(os.path.join(REPO, project))
+    write_readme(app, version)
+    compile_setup(ISCC, iss_name, version)
 
-full_src = os.path.join(REPO, "wpf", "bin", "Release", "net8.0-windows")
-full_out = os.path.join(RELEASE, f"logi-tray-v{FULL_VER}")
-shutil.rmtree(full_out, ignore_errors=True)
-files = copy_app_body(full_src, full_out, "logi-tray", "logi-tray", "logi-tray",
-                      FULL_VER, FULL_USAGE)
-print(f"  packaged {len(files)} files -> {os.path.basename(full_out)}")
-
-full_zip = os.path.join(RELEASE, f"logi-tray-v{FULL_VER}.zip")
-size = zip_dir(full_out, full_zip)
-print(f"  zip: {os.path.basename(full_zip)}  {size/1024:.0f} KB")
-
-# ---------- lite edition ----------
-print("\n=== lite edition ===")
-if not build(os.path.join("lite", "LogiTrayLite.csproj")):
-    raise SystemExit(1)
-
-lite_src = os.path.join(REPO, "lite", "bin", "Release", "net8.0-windows")
-lite_out = os.path.join(RELEASE, f"logi-tray-lite-v{LITE_VER}")
-shutil.rmtree(lite_out, ignore_errors=True)
-files = copy_app_body(lite_src, lite_out, "logi-tray-lite", "logi-tray-lite",
-                      "logi-tray-lite", LITE_VER, LITE_USAGE)
-print(f"  packaged {len(files)} files -> {os.path.basename(lite_out)}")
-
-lite_zip = os.path.join(RELEASE, f"logi-tray-lite-v{LITE_VER}.zip")
-size = zip_dir(lite_out, lite_zip)
-print(f"  zip: {os.path.basename(lite_zip)}  {size/1024:.0f} KB")
-
-# ---------- multi-brand edition ----------
-print("\n=== multi-brand edition ===")
-if not build(os.path.join("multi", "MultiTray.csproj")):
-    raise SystemExit(1)
-
-multi_src = os.path.join(REPO, "multi", "bin", "Release", "net8.0-windows")
-multi_out = os.path.join(RELEASE, f"multi-tray-v{MULTI_VER}")
-shutil.rmtree(multi_out, ignore_errors=True)
-files = copy_app_body(multi_src, multi_out, "multi-tray", "multi-tray",
-                      "multi-tray", MULTI_VER, MULTI_USAGE)
-print(f"  packaged {len(files)} files -> {os.path.basename(multi_out)}")
-
-multi_zip = os.path.join(RELEASE, f"multi-tray-v{MULTI_VER}.zip")
-size = zip_dir(multi_out, multi_zip)
-print(f"  zip: {os.path.basename(multi_zip)}  {size/1024:.0f} KB")
+    setup_exe = os.path.join(RELEASE, f"{app}-v{version}-setup.exe")
+    if not os.path.isfile(setup_exe):
+        print(f"  MISSING: {setup_exe}")
+        raise SystemExit(1)
+    produced.append(setup_exe)
+    print(f"  setup: {os.path.basename(setup_exe)}  {os.path.getsize(setup_exe)/1024:.0f} KB")
 
 print("\n=== summary ===")
-for z in (full_zip, lite_zip, multi_zip):
-    print(f"  {os.path.basename(z)}  {os.path.getsize(z)/1024:.0f} KB")
+for exe in produced:
+    print(f"  {os.path.basename(exe)}  {os.path.getsize(exe)/1024:.0f} KB")

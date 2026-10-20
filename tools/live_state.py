@@ -112,8 +112,9 @@ def main() -> int:
             continue
         print(f"  {r['tag_name']}:")
         for a in r.get("assets", []):
-            m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*?)-v(\d+\.\d+(?:\.\d+)?)\.zip$",
-                         a["name"])
+            # 两种分发形式都要认：老发布上是 .zip，v1.7 起是 -setup.exe
+            m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*?)-v(\d+\.\d+(?:\.\d+)?)"
+                         r"(?:-setup\.exe|\.zip)$", a["name"])
             if m:
                 print(f"     {m.group(1):<16} -> {m.group(2)}")
     return 0

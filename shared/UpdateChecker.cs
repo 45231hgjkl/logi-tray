@@ -13,7 +13,7 @@ namespace MouseBatteryTray;
 /// 为什么不能直接拿 release 的 tag 和本程序版本比较：
 /// 三个版本（完整版 / 轻量版 / 多品牌版）刻意使用**各自独立**的版本号，
 /// 一次发布里它们的资产版本号往往互不相同（例如 tag 是 v1.4.0，而资产分别是
-/// logi-tray-v1.2.1.zip / logi-tray-lite-v1.2.0.zip / multi-tray-v1.2.0.zip）。
+/// logi-tray-v1.2.1-setup.exe / logi-tray-lite-v1.2.0-setup.exe / multi-tray-v1.2.0-setup.exe）。
 /// 若拿 tag 比较，1.4.0 永远大于 1.2.0，于是用户从该 release 下载到的包
 /// 点「检查更新」仍会被告知有新版本，点「是」又下载到同一个包 —— 无限提示。
 ///
@@ -39,9 +39,15 @@ public static class UpdateChecker
     /// </summary>
     internal static string BaseUrl { get; set; } = RepoUrl;
 
-    /// <summary>资产文件名：形如 multi-tray-v1.2.0.zip。</summary>
-    private static readonly Regex ZipNamePattern =
-        new(@">([A-Za-z0-9][A-Za-z0-9._\-]*\.zip)<", RegexOptions.Compiled);
+    /// <summary>
+    /// 发布资产名：形如 multi-tray-v1.2.0-setup.exe。
+    ///
+    /// 从 v1.7 起分发包改成 Inno Setup 编译出来的安装程序（.exe），不再是 zip。
+    /// 打包脚本也只产出这一种，因此这里只认 -setup.exe：老发布上残留的 .zip
+    /// 不会被选中 —— 那正是要避免的，把用户引到需要解压再手动跑批处理的旧包。
+    /// </summary>
+    private static readonly Regex AssetNamePattern =
+        new(@">([A-Za-z0-9][A-Za-z0-9._\-]*-setup\.exe)<", RegexOptions.Compiled);
 
     /// <summary>一次查询的结果。</summary>
     public sealed class ReleaseLookup
@@ -52,7 +58,7 @@ public static class UpdateChecker
         /// <summary>本版对应的资产版本号（如 1.2.0）；该发布未包含本版资产时为 null。</summary>
         public string? AssetVersion { get; init; }
 
-        /// <summary>本版对应的资产文件名（如 multi-tray-v1.2.0.zip）。</summary>
+        /// <summary>本版对应的资产文件名（如 multi-tray-v1.2.0-setup.exe）。</summary>
         public string? AssetName { get; init; }
 
         /// <summary>
@@ -142,7 +148,7 @@ public static class UpdateChecker
         }
     }
 
-    /// <summary>从资产列表 HTML 片段里取出所有 .zip 资产名。</summary>
+    /// <summary>从资产列表 HTML 片段里取出所有 -setup.exe 资产名。</summary>
     public static List<string> ParseAssetNames(string? html)
     {
         var result = new List<string>();
@@ -151,7 +157,7 @@ public static class UpdateChecker
             return result;
         }
 
-        foreach (Match m in ZipNamePattern.Matches(html))
+        foreach (Match m in AssetNamePattern.Matches(html))
         {
             string name = m.Groups[1].Value;
             if (!result.Contains(name, StringComparer.OrdinalIgnoreCase))
@@ -166,8 +172,8 @@ public static class UpdateChecker
     /// <summary>
     /// 在资产名里找属于 <paramref name="assetPrefix"/> 那一版的版本号。
     ///
-    /// 必须整名匹配（形如 {prefix}-v1.2.3.zip），否则完整版的 logi-tray 会命中
-    /// 轻量版的 logi-tray-lite-v1.2.0.zip，反过来把新版判成旧版。
+    /// 必须整名匹配（形如 {prefix}-v1.2.3-setup.exe），否则完整版的 logi-tray 会命中
+    /// 轻量版的 logi-tray-lite-v1.2.0-setup.exe，反过来把新版判成旧版。
     /// </summary>
     public static string? ParseAssetVersion(IEnumerable<string>? assetNames, string? assetPrefix)
     {
@@ -177,7 +183,7 @@ public static class UpdateChecker
         }
 
         var pattern = new Regex(
-            "^" + Regex.Escape(assetPrefix!) + @"-v(\d+\.\d+(?:\.\d+)?)\.zip$",
+            "^" + Regex.Escape(assetPrefix!) + @"-v(\d+\.\d+(?:\.\d+)?)-setup\.exe$",
             RegexOptions.IgnoreCase);
 
         foreach (string? raw in assetNames)

@@ -98,17 +98,22 @@ logi-tray 基于 .NET 8 构建，需要微软官方**免费**的桌面运行时�
 >
 > 打开页面后选择：**.NET Desktop Runtime 8.0.x → Windows → x64**
 
-安装脚本会自动检测该运行时，缺失时会提示并引导你前往下载页面。
+安装程序在启动时会**先检测**该运行时；缺失时会提示并引导你打开上面的官方下载页，
+装好运行时再重新运行安装包即可。
 
 ### 下载应用本体
 
 前往 **[Releases 最新发布页面](https://github.com/yixing233/logi-tray/releases/latest)** 下载。提供**三个版本**，按需选择：
 
-| 版本 | 文件 | 内存占用（空闲） | 适合 |
+| 版本 | 安装包 | 内存占用（空闲） | 适合 |
 | --- | --- | --- | --- |
-| **完整版** | `logi-tray-v1.2.3.zip`（约 1.4 MB） | 工作集约 63 MB / 提交约 15 MB | 想要亚克力毛玻璃、三种图标样式与主题切换 |
-| **轻量版** | `logi-tray-lite-v1.2.2.zip`（约 0.9 MB） | 工作集约 51 MB / 提交约 12 MB | 只要电量数字，希望占用尽可能低 |
-| **多品牌版** | `multi-tray-v1.2.2.zip`（约 0.7 MB） | 工作集约 61 MB / 提交约 15 MB | 有键盘/鼠标/耳机等多台不同品牌设备 |
+| **完整版** | `logi-tray-v1.2.4-setup.exe`（约 2.9 MB） | 工作集约 63 MB / 提交约 15 MB | 想要亚克力毛玻璃、三种图标样式与主题切换 |
+| **轻量版** | `logi-tray-lite-v1.2.3-setup.exe`（约 2.6 MB） | 工作集约 51 MB / 提交约 12 MB | 只要电量数字，希望占用尽可能低 |
+| **多品牌版** | `multi-tray-v1.2.3-setup.exe`（约 2.6 MB） | 工作集约 61 MB / 提交约 15 MB | 有键盘/鼠标/耳机等多台不同品牌设备 |
+
+> 三个都是**单文件安装程序**（Inno Setup 编译），双击按向导安装即可，**全程不需要管理员权限**
+> （装到当前用户的 `%LOCALAPPDATA%\Programs\` 下）。安装包比原来的 zip 大，是因为安装器本身
+> 带上了中文界面、卸载程序与图标资源；程序文件体积没有变化。
 
 > 上表是**实测空闲值**（启动后不打开任何窗口，等待 9 秒稳定）。多品牌版自 v1.1.0 起
 > 改用与完整版相同的 WPF 亚克力外观层，因此不再有「47 MB」那样的轻量优势；
@@ -122,10 +127,13 @@ logi-tray 基于 .NET 8 构建，需要微软官方**免费**的桌面运行时�
 > `%LOCALAPPDATA%\logi-tray`、`%LOCALAPPDATA%\logi-tray-lite` 与 `%LOCALAPPDATA%\multi-tray`，互不干扰。
 
 > **三个版本各自独立编号。** 一次发布里 tag 是统一的（如 `v1.4.0`），但三个包的版本号
-> 各自演进，可能互不相同（上表即为 `1.2.3` / `1.2.2` / `1.2.2`）。因此应用内的
+> 各自演进，可能互不相同（上表即为 `1.2.4` / `1.2.3` / `1.2.3`）。因此应用内的
 > **「检查更新」比的是你自己那一版的最新包**（按文件名前缀解析，例如多品牌版看
-> `multi-tray-v*.zip`），而不是 release 的 tag —— 否则从 `v1.4.0` 下载到的 `1.2.1`
+> `multi-tray-v*-setup.exe`），而不是 release 的 tag —— 否则从 `v1.4.0` 下载到的 `1.2.1`
 > 会被永远提示「发现新版本」，点「是」又下载回同一个包。
+>
+> 旧版发布页上残留的 `.zip` 资产**不参与**这项比较，应用不会把你引回需要手动解压、
+> 再双击批处理的旧包里。
 
 #### 版本差异
 
@@ -252,14 +260,22 @@ PRO X Wireless                                        已休眠
 
 ### 安装方式
 
-解压后，包内已附带全自动脚本（两个版本各自独立，装哪个就运行哪个包里的脚本）：
+下载对应版本的 `*-setup.exe` 后双击，按向导点「下一步」即可。安装程序会依次完成：
 
-- **`一键安装.bat`**：自动检测 .NET 8 运行时 → 部署至 `%LOCALAPPDATA%\Programs\logi-tray`（轻量版为 `...\logi-tray-lite`）→ 创建开始菜单与桌面快捷方式 → 配置任务栏托盘常驻可见 → 立即启动（**全程无需管理员 UAC 提权**）；
-- **`卸载.bat`**：一键干净清除进程、自启项、快捷方式、程序文件与托盘注册记录。
+1. **检测 .NET 8 桌面运行时**，缺失时提示并帮你打开官方下载页（不会静默失败）；
+2. **部署到** `%LOCALAPPDATA%\Programs\logi-tray`（轻量版 `...\logi-tray-lite`，多品牌版 `...\multi-tray`），**全程不弹 UAC**；
+3. 创建**开始菜单**分组（含「卸载 …」入口）与可选的**桌面快捷方式**；
+4. 可勾选**开机自动启动**（只写当前用户的 `Run` 项，和设置里的开关是同一项）；
+5. 安装完成后启动程序，并把新增的托盘图标**从 Windows 11 的折叠区提出来**，免得你以为没装上。
 
-> 也可以直接双击 `logi-tray.exe`（轻量版为 `logi-tray-lite.exe`）绿色便携运行，不写入任何系统位置。
+卸载走标准流程：开始菜单里的「卸载 logi-tray」，或 **设置 → 应用 → 已安装的应用**。
+卸载会退出进程、清理自启项、快捷方式、程序文件与托盘注册记录，**保留**你的配置与历史
+（`%LOCALAPPDATA%\logi-tray` 等目录），需要彻底清除时手动删掉该目录即可。
+
+> **三个版本各自独立的安装项**（不同的 `AppId`），可以同时安装、同时运行、分别卸载，
+> 互不覆盖。升级时直接运行新版本的安装包即可，安装位置会被记住。
 >
-> **开机自启**：安装后打开设置中心，直接拨动「开机自动启动」开关即可，无需额外脚本。
+> 安装程序支持静默部署，便于批量安装：`logi-tray-vX.Y.Z-setup.exe /VERYSILENT /NORESTART`。
 
 ---
 
@@ -326,11 +342,13 @@ dotnet build multi/MultiTray.csproj -c Release
 ### 项目结构
 
 ```
+setup/      Inno Setup 安装工程（三版共用 app-common.iss + 三个入口 .iss）
 shared/     两个罗技版本共用的核心逻辑（电量轮询、HID 调用、配置、自启、配色）
 wpf/        完整版界面（WPF + 亚克力）
 lite/       轻量版界面（WinForms）
 multi/      多品牌版界面（WPF，复用 wpf/ 的亚克力外观层）
 native/     C++ HID++ 2.0 原生读取程序
+tools/      打包发布脚本（build + ISCC，产出 release/*-setup.exe）
 ```
 
 完整版与轻量版通过 `Compile Include="..\shared\*.cs"` 编译**同一份**核心源码，
@@ -350,13 +368,34 @@ build.bat
 
 ### 打包发布
 
+安装包由 [Inno Setup 6](https://jrsoftware.org/isinfo.php) 编译，先装一次编译器：
+
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+然后一条命令构建三个版本并产出安装包：
+
 ```powershell
 python tools/package_release.py
 ```
 
-会依次构建三个版本，并分别在 `release/` 下生成 `logi-tray-vX.Y.Z.zip`、
-`logi-tray-lite-vX.Y.Z.zip` 与 `multi-tray-vX.Y.Z.zip`，各自附带独立的
-`一键安装.bat` / `卸载.bat` / `使用说明.txt`。版本号取自各自的 `.csproj`。
+会在 `release/` 下生成
+
+- `logi-tray-vX.Y.Z-setup.exe`（完整版）
+- `logi-tray-lite-vX.Y.Z-setup.exe`（轻量版）
+- `multi-tray-vX.Y.Z-setup.exe`（多品牌版）
+
+版本号取自各自的 `.csproj`，由脚本用 `/DAppVersion=` 传给编译器，因此**不会**
+出现「改了 csproj 但安装包还是旧版本号」。三个 `.iss` 安装工程在 `setup/` 下，
+共用 `setup/app-common.iss`（部署目录、快捷方式、.NET 检测、托盘常驻、卸载清理
+全部只写一遍），各版本只声明自己的 exe 与图标。
+
+只想手工编某一版也可以（先 `dotnet build` 出程序本体）：
+
+```powershell
+ISCC.exe setup\logi-tray.iss
+```
 
 上传到 GitHub 由 `tools/release_v160.py` 负责（与发布说明配套，改名沿用上一次的
 `release_v*.py` 即可）：先建**草稿**并核对资产，再加 `--publish` 转公开，

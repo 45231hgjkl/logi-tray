@@ -54,5 +54,9 @@ __pycache__/
 /native/*.png
 /native/*.bmp
 
+# ---- 安装工程：使用说明.txt 由 tools/package_release.py 生成 ----
+#   （安装包会把它装进程序目录；源文件不入库，避免与脚本里的文案分叉）
+/setup/readme/
+
 # ---- Keep README assets ----
 !assets/**

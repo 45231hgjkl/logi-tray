@@ -664,10 +664,10 @@ public static class ProtocolTests
         // 这个顺序正是「按前缀 StartsWith 匹配」会出错的地方。
         var v140 = new List<string>
         {
-            "logi-tray-lite-v1.2.0.zip",
-            "logi-tray-v1.2.1.zip",
-            "multi-tray-v1.2.0.zip",
-            "source-code.zip",
+            "logi-tray-lite-v1.2.0-setup.exe",
+            "logi-tray-v1.2.1-setup.exe",
+            "multi-tray-v1.2.0-setup.exe",
+            "source-code.zip",          // 源码包仍然存在，但不是我们的分发资产
         };
         CheckEq("完整版取到 1.2.1",
                 UpdateChecker.ParseAssetVersion(v140, "logi-tray"), "1.2.1");
@@ -677,7 +677,7 @@ public static class ProtocolTests
                 UpdateChecker.ParseAssetVersion(v140, "multi-tray"), "1.2.0");
 
         // 关键：前缀必须整名匹配。若用 StartsWith，完整版的 logi-tray 会先命中
-        // logi-tray-lite-v1.2.0.zip，把轻量版版本号当成自己的，反之亦然。
+        // logi-tray-lite-v1.2.0-setup.exe，把轻量版版本号当成自己的，反之亦然。
         Check("完整版不会误取轻量版资产",
                 UpdateChecker.ParseAssetVersion(v140, "logi-tray") != "1.2.0");
 
@@ -697,7 +697,7 @@ public static class ProtocolTests
                     UpdateChecker.ParseAssetVersion(v140, "logi-tray-lite"), "1.2.0") <= 0);
 
         // ── 4. 真的有新版时必须报出来（防止改成永远不提示） ──
-        var newer = new List<string> { "multi-tray-v1.3.0.zip", "logi-tray-v1.5.0.zip" };
+        var newer = new List<string> { "multi-tray-v1.3.0-setup.exe", "logi-tray-v1.5.0-setup.exe" };
         Check("multi-tray 1.2.0 → 1.3.0 报新版本",
                 UpdateChecker.CompareVersions(
                     UpdateChecker.ParseAssetVersion(newer, "multi-tray"), "1.2.0") > 0);
@@ -708,13 +708,29 @@ public static class ProtocolTests
                 UpdateChecker.ParseAssetVersion(newer, "logi-tray-lite") == null);
 
         // ── 5. HTML 抽取资产名 ──
-        string html = "<li><a href=\"/x\"><span class=\"text-bold\">multi-tray-v1.2.0.zip</span></a></li>"
-                    + "<li><span class=\"text-bold\">logi-tray-v1.2.1.zip</span></li>";
+        string html = "<li><a href=\"/x\"><span class=\"text-bold\">multi-tray-v1.2.0-setup.exe</span></a></li>"
+                    + "<li><span class=\"text-bold\">logi-tray-v1.2.1-setup.exe</span></li>";
         var names = UpdateChecker.ParseAssetNames(html);
         CheckEq("抽到 2 个资产", names.Count, 2);
-        Check("抽到 multi-tray 资产名", names.Contains("multi-tray-v1.2.0.zip"));
+        Check("抽到 multi-tray 资产名", names.Contains("multi-tray-v1.2.0-setup.exe"));
         Check("页面无资产时返回空表",
                 UpdateChecker.ParseAssetNames("<html></html>").Count == 0);
+
+        // ── 5b. 旧的分发形式（.zip）不再参与「有没有新版本」的判断 ──
+        // v1.7 起安装包改成 Inno Setup 的 -setup.exe；老发布上残留的 .zip 不能被
+        // 选中，否则用户点「检查更新」会被引到需要解压再手动跑批处理的旧包里。
+        var legacyZips = new List<string>
+        {
+            "logi-tray-v1.9.9.zip",
+            "logi-tray-lite-v1.9.9.zip",
+            "multi-tray-v1.9.9.zip",
+        };
+        Check("旧 .zip 不算完整版的新版本",
+                UpdateChecker.ParseAssetVersion(legacyZips, "logi-tray") == null);
+        Check("旧 .zip 不算轻量版的新版本",
+                UpdateChecker.ParseAssetVersion(legacyZips, "logi-tray-lite") == null);
+        Check("旧 .zip 不算多品牌版的新版本",
+                UpdateChecker.ParseAssetVersion(legacyZips, "multi-tray") == null);
 
         // ── 6. 版本比较的基本性质 ──
         Check("1.10.0 > 1.9.0", UpdateChecker.CompareVersions("1.10.0", "1.9.0") > 0);
@@ -794,9 +810,9 @@ public static class ProtocolTests
                         {
                             // 顺序照抄真实发布页：轻量版排在完整版前面
                             const string body =
-                                "<li><span class=\"text-bold\">logi-tray-lite-v1.2.0.zip</span></li>" +
-                                "<li><span class=\"text-bold\">logi-tray-v1.2.1.zip</span></li>" +
-                                "<li><span class=\"text-bold\">multi-tray-v1.2.0.zip</span></li>";
+                                "<li><span class=\"text-bold\">logi-tray-lite-v1.2.0-setup.exe</span></li>" +
+                                "<li><span class=\"text-bold\">logi-tray-v1.2.1-setup.exe</span></li>" +
+                                "<li><span class=\"text-bold\">multi-tray-v1.2.0-setup.exe</span></li>";
                             response = "HTTP/1.1 200 OK\r\n"
                                      + "Content-Type: text/html; charset=utf-8\r\n"
                                      + $"Content-Length: {Encoding.UTF8.GetByteCount(body)}\r\n"
@@ -833,7 +849,7 @@ public static class ProtocolTests
             CheckEq("端到端：从 302 解析出 tag", lookup?.Tag, "v1.4.0");
             Check("端到端：资产列表已解析", lookup?.AssetsResolved == true);
             CheckEq("端到端：多品牌版版本号", lookup?.AssetVersion, "1.2.0");
-            CheckEq("端到端：资产文件名", lookup?.AssetName, "multi-tray-v1.2.0.zip");
+            CheckEq("端到端：资产文件名", lookup?.AssetName, "multi-tray-v1.2.0-setup.exe");
             Check("端到端：不误判为有新版本",
                     UpdateChecker.CompareVersions(lookup?.AssetVersion, "1.2.0") <= 0);
 
